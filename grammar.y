@@ -5,6 +5,8 @@
     #include <map>
     #include <memory>
 
+    
+
     enum ActionType { PRINT_VAR, DO_WHILE };
     enum OperatorType { INCREMENT, DECREMENT };
     enum CompareType { LESS_THAN, GREATER_THAN };
@@ -26,6 +28,8 @@
         int limit;
         CompareType cmp_type;
     };
+
+    extern void init_variable(const std::string& name);
 
     extern std::map<std::string, int> variables;
     extern FILE* yyin;
@@ -168,8 +172,16 @@ dws_block:
 ;
 
 inc_dec_op:
-    INC VAR { $$ = new std::pair<OperatorType, std::string>(INCREMENT, *$2); delete $2; }
-    | DEC VAR { $$ = new std::pair<OperatorType, std::string>(DECREMENT, *$2); delete $2; }
+    INC VAR { 
+        init_variable(*$2);
+        $$ = new std::pair<OperatorType, std::string>(INCREMENT, *$2); 
+        delete $2; 
+    }
+    | DEC VAR { 
+        init_variable(*$2);
+        $$ = new std::pair<OperatorType, std::string>(DECREMENT, *$2); 
+        delete $2; 
+    }
 ;
 
 condition:
@@ -185,7 +197,21 @@ condition:
 
 %%
 
+void init_variable(const std::string& name) {
+    if (variables.find(name) == variables.end()) {
+        variables[name] = 0;
+        std::cout << "[Инициализация] Переменная " << name << " = 0\n";
+    }
+}
+
 void execute_action(const Action& action, int depth) {
+    if (action.type == PRINT_VAR) {
+        init_variable(action.var_name);
+    }
+    else if (action.type == DO_WHILE) {
+        init_variable(action.cond_var);
+    }
+
     std::string indent(depth * 2, ' ');
     
     switch (action.type) {
@@ -247,11 +273,6 @@ void yyerror(const char* s) {
 
 int main() {
     SetConsoleOutputCP(CP_UTF8);
-    variables["a"] = 0;
-    variables["b"] = 0;
-    variables["c"] = 0;
-    variables["d"] = 0;
-
     yyin = fopen("input.txt", "r");
     if (!yyin) {
         std::cerr << "Не удалось открыть input.txt" << std::endl;
@@ -261,5 +282,11 @@ int main() {
     std::cout << "=== Выполнение do-while ===" << std::endl;
     yyparse();
     fclose(yyin);
-    return 0;
+
+    std::cout << "\n=== Итоговые значения переменных ===" << std::endl;
+    for (const auto& [name, value] : variables) {
+        std::cout << name << " = " << value << std::endl;
+    }
+    
+    return 0; 
 }
