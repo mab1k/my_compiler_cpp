@@ -5,8 +5,6 @@
     #include <map>
     #include <memory>
 
-    
-
     enum ActionType { PRINT_VAR, DO_WHILE };
     enum OperatorType { INCREMENT, DECREMENT };
     enum CompareType { LESS_THAN, GREATER_THAN };
@@ -30,10 +28,10 @@
     };
 
     extern void init_variable(const std::string& name);
-
     extern std::map<std::string, int> variables;
     extern FILE* yyin;
-    void execute_action(const Action& action, int depth = 0);
+    void execute_action(const Action& action, int depth, bool debug);
+    void execute_clean(const Action& action);
 }
 
 %{
@@ -47,6 +45,7 @@ int yylex();
 void yyerror(const char* s);
 
 std::map<std::string, int> variables;
+bool debug_mode = true;
 %}
 
 %union {
@@ -71,7 +70,6 @@ std::map<std::string, int> variables;
 %%
 
 program:
-    /* пусто */
     | program DWS
 ;
 
@@ -80,9 +78,13 @@ DWS:
         auto block_actions = *$2;
         auto* cond = $5;
         
+        // debug run
+        std::cout << "=== Debug Run ===\n";
+        debug_mode = true;
+        variables.clear();
+        
         int max_iter = 100, iter = 0;
         bool result;
-
         do {
             if (++iter > max_iter) {
                 std::cerr << "[ОШИБКА] Превышен лимит итераций\n";
@@ -92,7 +94,7 @@ DWS:
             std::cout << "[Итерация " << iter << "]\n";
             
             for (const auto& act : block_actions) {
-                execute_action(act, 1);
+                execute_action(act, 1, true);
             }
 
             int before = variables[cond->var_name];
@@ -115,6 +117,35 @@ DWS:
                       << (cond->cmp_type == LESS_THAN ? "<" : ">") << " " << cond->limit
                       << " → " << (result ? "истинно" : "ложно") << "\n";
 
+        } while (result);
+        
+        // clean run
+        std::cout << "\n=== Clean Run ===\n";
+        debug_mode = false;
+        variables.clear();
+        iter = 0;
+        
+        do {
+            if (++iter > max_iter) {
+                std::cerr << "Ошибка: Превышен лимит итераций\n";
+                exit(1);
+            }
+            
+            for (const auto& act : block_actions) {
+                execute_action(act, 1, false);
+            }
+
+            if (cond->op_type == INCREMENT) {
+                ++variables[cond->var_name];
+            } else {
+                --variables[cond->var_name];
+            }
+            
+            if (cond->cmp_type == LESS_THAN) {
+                result = variables[cond->var_name] < cond->limit;
+            } else {
+                result = variables[cond->var_name] > cond->limit;
+            }
         } while (result);
         
         delete $2;
@@ -200,11 +231,13 @@ condition:
 void init_variable(const std::string& name) {
     if (variables.find(name) == variables.end()) {
         variables[name] = 0;
-        std::cout << "[Инициализация] Переменная " << name << " = 0\n";
+        if (debug_mode) {
+            std::cout << "[Инициализация] Переменная " << name << " = 0\n";
+        }
     }
 }
 
-void execute_action(const Action& action, int depth) {
+void execute_action(const Action& action, int depth, bool debug) {
     if (action.type == PRINT_VAR) {
         init_variable(action.var_name);
     }
@@ -223,7 +256,11 @@ void execute_action(const Action& action, int depth) {
             } else {
                 --var;
             }
-            std::cout << indent << action.var_name << " = " << var << " (было " << before << ")\n";
+            if (debug) {
+                std::cout << indent << action.var_name << " = " << var << " (было " << before << ")\n";
+            } else {
+                std::cout << var << "\n";
+            }
             break;
         }
         case DO_WHILE: {
@@ -232,14 +269,17 @@ void execute_action(const Action& action, int depth) {
             
             do {
                 if (++iter > 100) {
-                    std::cerr << indent << "[ОШИБКА] Превышен лимит итераций цикла\n";
+                    std::cerr << indent << (debug ? "[ОШИБКА] " : "") 
+                              << "Превышен лимит итераций цикла\n";
                     exit(1);
                 }
                 
-                std::cout << indent << "[Итерация " << iter << "]\n";
+                if (debug) {
+                    std::cout << indent << "[Итерация " << iter << "]\n";
+                }
                 
                 for (const auto& nested_action : action.nested) {
-                    execute_action(nested_action, depth + 1);
+                    execute_action(nested_action, depth + 1, debug);
                 }
                 
                 int before = variables[action.cond_var];
@@ -256,11 +296,13 @@ void execute_action(const Action& action, int depth) {
                     result = after > action.cond_limit;
                 }
                 
-                std::cout << indent << "[Условие] проверка: " 
-                          << (action.cond_op_type == INCREMENT ? "++" : "--") 
-                          << action.cond_var << "[" << before << "] "
-                          << (action.cmp_type == LESS_THAN ? "<" : ">") << " " << action.cond_limit
-                          << " → " << (result ? "истинно" : "ложно") << "\n";
+                if (debug) {
+                    std::cout << indent << "[Условие] проверка: " 
+                              << (action.cond_op_type == INCREMENT ? "++" : "--") 
+                              << action.cond_var << "[" << before << "] "
+                              << (action.cmp_type == LESS_THAN ? "<" : ">") << " " << action.cond_limit
+                              << " → " << (result ? "истинно" : "ложно") << "\n";
+                }
             } while (result);
             break;
         }
@@ -279,10 +321,9 @@ int main() {
         return 1;
     }
 
-    std::cout << "=== Выполнение do-while ===" << std::endl;
     yyparse();
     fclose(yyin);
-
+    
     std::cout << "\n=== Итоговые значения переменных ===" << std::endl;
     for (const auto& [name, value] : variables) {
         std::cout << name << " = " << value << std::endl;
